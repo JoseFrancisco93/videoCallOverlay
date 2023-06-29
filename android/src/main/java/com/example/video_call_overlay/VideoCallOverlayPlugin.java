@@ -20,6 +20,19 @@ import android.graphics.Typeface;
 import android.graphics.RectF;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.app.PendingIntent;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import androidx.core.app.TaskStackBuilder;
+import android.view.ViewGroup.LayoutParams;
+import android.widget.ImageView;
+import android.view.Gravity;
+import android.widget.FrameLayout;
+import android.widget.RelativeLayout;
+import android.graphics.Color;
+import android.util.TypedValue;
+import android.graphics.drawable.Icon;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -34,11 +47,13 @@ import io.flutter.plugin.common.MethodChannel.Result;
 import io.flutter.embedding.engine.plugins.activity.ActivityAware;
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
 import io.flutter.plugin.common.PluginRegistry.ActivityResultListener;
+import io.flutter.embedding.android.FlutterActivity;
 
 public class VideoCallOverlayPlugin implements FlutterPlugin, MethodCallHandler, ActivityAware, ActivityResultListener {
     private MethodChannel channel;
     private Context applicationContext;
     private static final String CHANNEL_ID = "video_call_overlay_channel";
+    private static final String CHANNEL = "video_call_overlay";
     private static final int NOTIFICATION_ID = 123;
     private static final int OVERLAY_PERMISSION_REQUEST_CODE = 100;
     private Activity activity;
@@ -50,20 +65,20 @@ public class VideoCallOverlayPlugin implements FlutterPlugin, MethodCallHandler,
 
     @Override
     public void onAttachedToEngine(@NonNull FlutterPlugin.FlutterPluginBinding flutterPluginBinding) {
-        applicationContext = flutterPluginBinding.getApplicationContext();
-        channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), "video_call_overlay");
-        channel.setMethodCallHandler(this);
+        this.applicationContext = flutterPluginBinding.getApplicationContext();
+        this.channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), CHANNEL);
+        this.channel.setMethodCallHandler(this);
     }
 
     @Override
     public void onAttachedToActivity(@NonNull ActivityPluginBinding binding) {
-        activity = binding.getActivity();
+        this.activity = binding.getActivity();
         binding.addActivityResultListener(this);
     }
 
     @Override
     public void onDetachedFromActivityForConfigChanges() {
-        activity = null;
+        this.activity = null;
     }
 
     @Override
@@ -74,7 +89,7 @@ public class VideoCallOverlayPlugin implements FlutterPlugin, MethodCallHandler,
 
     @Override
     public void onDetachedFromActivity() {
-        activity = null;
+        this.activity = null;
     }
 
     @Override
@@ -95,17 +110,18 @@ public class VideoCallOverlayPlugin implements FlutterPlugin, MethodCallHandler,
     }
 
     private void showNotificationOverlay(String notificationText, String initials) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(applicationContext)) {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + applicationContext.getPackageName()));
+            activity.startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST_CODE);
+            return;
+        }
+
         if (activity != null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(applicationContext)) {
-                Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:" + applicationContext.getPackageName()));
-                activity.startActivityForResult(intent, OVERLAY_PERMISSION_REQUEST_CODE);
-                return;
-            }
 
             if (!isOverlayVisible) {
-                int squareWidth = 170;
-                int squareHeight = 92;
+                int squareWidth = 180;
+                int squareHeight = 100;
                 int borderRadius = 8;
                 int circleSize = 34;
 
@@ -120,7 +136,7 @@ public class VideoCallOverlayPlugin implements FlutterPlugin, MethodCallHandler,
                                 | WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS,
                         PixelFormat.TRANSPARENT);
 
-                overlayView = new View(applicationContext) {
+                overlayView = new RelativeLayout(applicationContext) {
                     @Override
                     protected void onDraw(Canvas canvas) {
                         super.onDraw(canvas);
@@ -131,7 +147,8 @@ public class VideoCallOverlayPlugin implements FlutterPlugin, MethodCallHandler,
                         int squareBottom = getHeight();
 
                         Paint squarePaint = new Paint();
-                        squarePaint.setColor(Color.BLACK);
+                        int blackWithOpacity = Color.argb((int) (255 * 0.85), 0, 0, 0);
+                        squarePaint.setColor(blackWithOpacity);
                         squarePaint.setStyle(Paint.Style.FILL);
                         squarePaint.setAntiAlias(true);
 
@@ -165,32 +182,47 @@ public class VideoCallOverlayPlugin implements FlutterPlugin, MethodCallHandler,
                         float textY = circleCenterY + (textHeight / 2) - textBounds.bottom;
 
                         // Dibujar el primer icono en la parte superior derecha
-                        Drawable icon1 = getResources().getDrawable(R.drawable.ic_expand);
-                        int icon1Size = 30; // Tamaño del icono en píxeles
-                        int icon1Padding = 4; // Espaciado del icono en píxeles
+                        ImageView icon1 = new ImageView(applicationContext);
+                        icon1.setImageResource(R.drawable.ic_expand);
+                        icon1.setColorFilter(Color.WHITE);
+                        int margin = (int) TypedValue.applyDimension(
+                                TypedValue.COMPLEX_UNIT_DIP,
+                                4,
+                                applicationContext.getResources().getDisplayMetrics());
 
-                        int icon1Left = getWidth() - icon1Size - icon1Padding;
-                        int icon1Top = icon1Padding;
-                        int icon1Right = getWidth() - icon1Padding;
-                        int icon1Bottom = icon1Size + icon1Padding;
-
-                        Rect icon1Rect = new Rect(icon1Left, icon1Top, icon1Right, icon1Bottom);
-                        icon1.setBounds(icon1Rect);
-                        icon1.draw(canvas);
+                        RelativeLayout.LayoutParams icon1Params = new RelativeLayout.LayoutParams(
+                                27,
+                                27);
+                        icon1Params.addRule(RelativeLayout.ALIGN_PARENT_TOP);
+                        icon1Params.addRule(RelativeLayout.ALIGN_PARENT_END);
+                        icon1Params.setMargins(0, margin, margin, 0);
+                        icon1.setLayoutParams(icon1Params);
+                        icon1.setOnClickListener(new View.OnClickListener() {
+                            @Override
+                            public void onClick(View v) {
+                                channel.invokeMethod("onIcon1Click", null);
+                            }
+                        });
+                        addView(icon1, icon1Params);
 
                         // Dibujar el segundo icono en la parte inferior izquierda
-                        Drawable icon2 = getResources().getDrawable(R.drawable.ic_mic);
-                        int icon2Size = 30; // Tamaño del icono en píxeles
-                        int icon2Padding = 4; // Espaciado del icono en píxeles
-
-                        int icon2Left = icon2Padding;
-                        int icon2Top = getHeight() - icon2Size - icon2Padding;
-                        int icon2Right = icon2Size + icon2Padding;
-                        int icon2Bottom = getHeight() - icon2Padding;
-
-                        Rect icon2Rect = new Rect(icon2Left, icon2Top, icon2Right, icon2Bottom);
-                        icon2.setBounds(icon2Rect);
-                        icon2.draw(canvas);
+                        ImageView icon2 = new ImageView(applicationContext);
+                        icon2.setImageResource(R.drawable.ic_mic);
+                        icon2.setColorFilter(Color.WHITE);
+                        RelativeLayout.LayoutParams icon2Params = new RelativeLayout.LayoutParams(
+                                26,
+                                26);
+                        icon2Params.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+                        icon2Params.addRule(RelativeLayout.ALIGN_PARENT_START);
+                        icon2Params.setMargins(margin, 0, 0, margin);
+                        icon2.setLayoutParams(icon2Params);
+                        icon2.setOnClickListener(new View.OnClickListener() {
+                            @Override
+                            public void onClick(View v) {
+                                channel.invokeMethod("onIcon2Click", null);
+                            }
+                        });
+                        addView(icon2, icon2Params);
 
                         canvas.drawText(initialsText, textX, textY, textPaint);
                     }
@@ -218,20 +250,16 @@ public class VideoCallOverlayPlugin implements FlutterPlugin, MethodCallHandler,
 
                         switch (event.getAction()) {
                             case MotionEvent.ACTION_DOWN:
-                                // Obtener las coordenadas iniciales del toque
                                 initialX = event.getRawX();
                                 initialY = event.getRawY();
                                 offsetX = layoutParams.x;
                                 offsetY = layoutParams.y;
                                 break;
                             case MotionEvent.ACTION_MOVE:
-                                // Calcular la diferencia entre las coordenadas actuales y las iniciales
                                 float dx = event.getRawX() - initialX;
                                 float dy = event.getRawY() - initialY;
-                                // Actualizar la posición del widget
                                 layoutParams.x = (int) (offsetX + dx);
                                 layoutParams.y = (int) (offsetY + dy);
-                                // Actualizar la vista del widget
                                 WindowManager windowManager = (WindowManager) applicationContext
                                         .getSystemService(Context.WINDOW_SERVICE);
                                 if (windowManager != null) {
@@ -245,13 +273,24 @@ public class VideoCallOverlayPlugin implements FlutterPlugin, MethodCallHandler,
                 isOverlayVisible = true;
             }
 
+            Intent openAppIntent = new Intent(applicationContext, VideoCallOverlayPlugin.class);
+            openAppIntent.setAction(Intent.ACTION_MAIN);
+            openAppIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+            openAppIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            openAppIntent.putExtra("notification", true);
+
+            // TaskStackBuilder stackBuilder = TaskStackBuilder.create(applicationContext);
+            // stackBuilder.addNextIntent(openAppIntent);
+            PendingIntent openAppPendingIntent = PendingIntent.getActivity(applicationContext, 0, openAppIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
             createNotificationChannel();
             NotificationCompat.Builder builder = new NotificationCompat.Builder(applicationContext, CHANNEL_ID)
                     .setSmallIcon(R.drawable.ic_call_black)
                     .setContentTitle("En video llamada")
                     .setContentText(notificationText)
                     .setPriority(NotificationCompat.PRIORITY_HIGH)
-                    .setOngoing(true);
+                    .setContentIntent(openAppPendingIntent);
 
             NotificationManagerCompat notificationManager = NotificationManagerCompat.from(applicationContext);
             notificationManager.notify(NOTIFICATION_ID, builder.build());
@@ -284,29 +323,22 @@ public class VideoCallOverlayPlugin implements FlutterPlugin, MethodCallHandler,
                 }
                 isOverlayVisible = false;
             }
-
-            NotificationManagerCompat notificationManager = NotificationManagerCompat.from(applicationContext);
-            notificationManager.cancel(NOTIFICATION_ID);
         }
+        NotificationManagerCompat notificationManager = NotificationManagerCompat.from(applicationContext);
+        notificationManager.cancel(NOTIFICATION_ID);
     }
 
     @Override
     public void onDetachedFromEngine(@NonNull FlutterPlugin.FlutterPluginBinding binding) {
-        channel.setMethodCallHandler(null);
-        applicationContext = null;
+        this.channel.setMethodCallHandler(null);
+        this.applicationContext = null;
     }
 
     @Override
     public boolean onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         if (requestCode == OVERLAY_PERMISSION_REQUEST_CODE) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(activity)) {
-                // Permiso concedido, puedes continuar con la lógica para mostrar la
-                // superposición
-                // ...
             } else {
-                // Permiso no concedido, puedes mostrar un mensaje al usuario o realizar alguna
-                // acción adicional
-                // ...
             }
             return true;
         }
